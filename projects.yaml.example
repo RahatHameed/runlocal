@@ -1,0 +1,22 @@
+# Project configuration for workflow-dispatch agent
+# Copy this file to projects.yaml and customize for your projects
+# NOTE: projects.yaml is gitignored and should NOT be committed
+
+projects:
+  # Test repository - use this to test the tool
+  test:
+    repo: RahatHameed/runlocal-test
+    workflow: test.yaml
+    branch: main
+    defaults:
+      message: "Hello from runlocal!"
+      sleep_seconds: "15"
+
+  # Add more projects as needed:
+  # my-project:
+  #   repo: owner/repo-name
+  #   workflow: workflow-file.yaml
+  #   branch: main
+  #   defaults:
+  #     param1: value1
+  #     param2: value2

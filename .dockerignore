@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Environment
+.env
+
+# Project specific
+projects.yaml
+*.log
+agent_audit.jsonl
+
+# Claude
+.claude/
+
+# Docs (not needed in container)
+LICENSE
+*.md

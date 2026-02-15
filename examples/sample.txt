@@ -1,0 +1,8 @@
+This is a sample file for testing the file reader agent.
+
+It contains some example text that the agent can read and summarize.
+
+Key points:
+- This file demonstrates the agent's ability to read files
+- The agent will provide a summary of this content
+- No modifications will be made to this file
