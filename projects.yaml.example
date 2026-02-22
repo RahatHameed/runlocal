@@ -12,6 +12,15 @@ projects:
       message: "Hello from runlocal!"
       sleep_seconds: "15"
 
+  # Choice test - demonstrates parameter validation with auto-correction
+  choice-test:
+    repo: RahatHameed/runlocal-test
+    workflow: choice-test.yaml
+    branch: main
+    defaults:
+      environment: "Development"
+      database: "MySQL8.0"
+
   # Add more projects as needed:
   # my-project:
   #   repo: owner/repo-name
