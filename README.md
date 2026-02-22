@@ -8,8 +8,11 @@ A lightweight, Dockerized framework for running local automation scripts.
 
 ## Features
 
-- File reading with glob patterns and syntax highlighting
 - GitHub Actions workflow triggering and monitoring
+- **Parameter validation** with auto-correction for case mismatches
+- **Auto-detect workflow file extensions** (.yml/.yaml)
+- **Parallel status checks** for all configured projects
+- File reading with glob patterns and syntax highlighting
 - Rich colored terminal output
 - Easy to extend with new scripts
 
@@ -22,8 +25,9 @@ A lightweight, Dockerized framework for running local automation scripts.
 
 ```bash
 make up                            # Setup and build
-nano .env                          # Add your GITHUB_TOKEN
+make setup                         # Interactive .env setup (or edit .env manually)
 make workflow-trigger project=test # Run a workflow
+make workflow-status-all           # Check all projects
 ```
 
 ## Commands
@@ -31,11 +35,14 @@ make workflow-trigger project=test # Run a workflow
 | Command | Description |
 |---------|-------------|
 | `make up` | Setup and build (run this first) |
+| `make setup` | Interactive setup for .env file |
 | `make down` | Stop containers |
 | `make list` | List available scripts |
 | `make file-reader` | Read files |
 | `make workflow-trigger` | Trigger workflow |
 | `make workflow-status` | Check workflow status |
+| `make workflow-list` | List workflows and their inputs |
+| `make workflow-status-all` | Check status of all projects |
 | `make clean` | Remove Docker images |
 
 ### Examples
@@ -48,10 +55,25 @@ make file-reader pattern="*.txt" verbose=1
 # Workflow trigger
 make workflow-trigger project=test
 make workflow-trigger project=test wait=1
-make workflow-trigger project=test param=message="Hello"
+make workflow-trigger project=test param=limit="PHP8.5/MySQL8.0"
 
 # Workflow status
 make workflow-status project=test
+
+# Check all projects at once
+make workflow-status-all
+
+# List available workflows and inputs
+make workflow-list project=test
+```
+
+### Parameter Validation
+
+The tool automatically validates workflow parameters and corrects case mismatches:
+
+```
+$ make workflow-trigger project=myproject param=limit="PHP8.5/mariadb11"
+Warning: Correcting 'PHP8.5/mariadb11' to 'PHP8.5/MariaDb11'
 ```
 
 ### What's happening under the hood?

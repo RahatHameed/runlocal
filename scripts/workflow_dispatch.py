@@ -189,12 +189,132 @@ class WorkflowDispatchScript(BaseScript):
         except FileNotFoundError:
             return False
 
+    def _resolve_workflow_file(self, repo: str, workflow: str) -> Optional[str]:
+        """
+        Resolve the correct workflow filename by trying both .yml and .yaml extensions.
+        Returns the resolved workflow name or None if not found.
+        """
+        # If workflow already has extension, try it first then the alternative
+        base_name = workflow.removesuffix('.yml').removesuffix('.yaml')
+        extensions = ['.yml', '.yaml']
+
+        # Prioritize the original extension if provided
+        if workflow.endswith('.yml'):
+            extensions = ['.yml', '.yaml']
+        elif workflow.endswith('.yaml'):
+            extensions = ['.yaml', '.yml']
+
+        for ext in extensions:
+            test_workflow = base_name + ext
+            # Check if workflow exists by listing workflows
+            cmd = ["gh", "workflow", "list", "-R", repo, "--json", "name,path"]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    workflows = json.loads(result.stdout)
+                    for wf in workflows:
+                        if wf.get("path", "").endswith(test_workflow):
+                            return test_workflow
+            except Exception:
+                pass
+
+        # Fallback to original workflow name
+        return workflow
+
+    def _get_workflow_inputs(self, repo: str, workflow: str, branch: str = None) -> Dict[str, Any]:
+        """
+        Fetch allowed input values for a workflow from GitHub API.
+        Returns a dict of input_name -> {type, options, default, required}.
+        """
+        import base64
+
+        try:
+            # Construct the workflow path
+            workflow_path = f".github/workflows/{workflow}"
+
+            # Build API URL with branch reference if provided
+            api_url = f"repos/{repo}/contents/{workflow_path}"
+            if branch:
+                api_url += f"?ref={branch}"
+
+            # Get workflow content directly
+            cmd = ["gh", "api", api_url, "--jq", ".content"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                return {}
+
+            if not result.stdout.strip():
+                return {}
+
+            content = base64.b64decode(result.stdout.strip()).decode('utf-8')
+            workflow_yaml = yaml.safe_load(content)
+
+            inputs = {}
+            # Handle 'on' key - YAML parses 'on' as boolean True, so check both
+            on_config = workflow_yaml.get("on") or workflow_yaml.get(True, {})
+            if isinstance(on_config, dict):
+                dispatch_inputs = on_config.get("workflow_dispatch", {})
+                if isinstance(dispatch_inputs, dict):
+                    dispatch_inputs = dispatch_inputs.get("inputs", {})
+                else:
+                    dispatch_inputs = {}
+            else:
+                dispatch_inputs = {}
+
+            for name, config in dispatch_inputs.items():
+                if isinstance(config, dict):
+                    inputs[name] = {
+                        "type": config.get("type", "string"),
+                        "options": config.get("options", []),
+                        "default": config.get("default"),
+                        "required": config.get("required", False),
+                        "description": config.get("description", "")
+                    }
+
+            return inputs
+        except Exception as e:
+            return {}
+
+    def _validate_and_fix_params(self, repo: str, workflow: str, branch: str, params: Dict[str, str]) -> Dict[str, str]:
+        """
+        Validate parameters against allowed values and fix case mismatches.
+        """
+        inputs = self._get_workflow_inputs(repo, workflow, branch)
+        if not inputs:
+            return params  # Can't validate, pass through
+
+        fixed_params = {}
+        for key, value in params.items():
+            if key in inputs and inputs[key].get("options"):
+                allowed = inputs[key]["options"]
+                if value not in allowed:
+                    # Try case-insensitive match
+                    match = next((opt for opt in allowed if opt.lower() == value.lower()), None)
+                    if match:
+                        self.console.print(f"[yellow]Warning: Correcting '{value}' to '{match}'[/yellow]")
+                        fixed_params[key] = match
+                        continue
+                    else:
+                        self.console.print(f"[red]Invalid value '{value}' for '{key}'[/red]")
+                        self.console.print(f"[dim]Allowed values: {', '.join(allowed)}[/dim]")
+            fixed_params[key] = value
+
+        return fixed_params
+
     def _trigger_workflow(self, repo: str, workflow: str, branch: str,
                           params: Dict[str, str]) -> Optional[str]:
         """Trigger the workflow and return the run ID."""
-        cmd = ["gh", "workflow", "run", workflow, "-R", repo, "--ref", branch]
+        # Resolve correct workflow filename
+        resolved_workflow = self._resolve_workflow_file(repo, workflow)
+        if resolved_workflow != workflow:
+            self.console.print(f"[dim]Resolved workflow: {resolved_workflow}[/dim]")
 
-        for key, value in params.items():
+        # Validate and fix parameters
+        fixed_params = self._validate_and_fix_params(repo, resolved_workflow, branch, params)
+
+        cmd = ["gh", "workflow", "run", resolved_workflow, "-R", repo, "--ref", branch]
+
+        for key, value in fixed_params.items():
             cmd.extend(["-f", f"{key}={value}"])
 
         try:
@@ -208,7 +328,7 @@ class WorkflowDispatchScript(BaseScript):
             time.sleep(3)
 
             # Get the most recent run ID
-            return self._get_latest_run_id(repo, workflow)
+            return self._get_latest_run_id(repo, resolved_workflow)
 
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")

@@ -188,6 +188,18 @@ Examples:
         if args.workflow:
             kwargs["workflow"] = args.workflow
 
+    elif args.script == "workflow-list":
+        if not args.project:
+            console.print("[red]Error: --project is required for workflow-list[/red]")
+            console.print("[dim]Example: python run.py workflow-list --project test[/dim]")
+            return 1
+
+        kwargs["project"] = args.project
+
+    elif args.script == "workflow-status-all":
+        # No additional arguments needed
+        pass
+
     return run_script(args.script, verbose=args.verbose, **kwargs)
 
 
