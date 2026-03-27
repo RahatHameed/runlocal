@@ -74,6 +74,11 @@ class WorkflowStatusScript(BaseScript):
         # Display status
         self._display_status(project, repo, workflow, run_info)
 
+        # Show failed jobs if workflow failed
+        conclusion = run_info.get("conclusion", "")
+        if conclusion == "failure":
+            self._show_failed_jobs(repo, run_info["id"])
+
         # Show logs if verbose
         if verbose:
             self._show_logs(repo, run_info["id"])
@@ -171,6 +176,139 @@ class WorkflowStatusScript(BaseScript):
         table.add_row("URL", run_info.get("url", ""))
 
         self.console.print(table)
+
+    def _show_failed_jobs(self, repo: str, run_id: str) -> None:
+        """Show failed jobs for a workflow run."""
+        cmd = [
+            "gh", "run", "view", run_id,
+            "-R", repo,
+            "--json", "jobs"
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                jobs = data.get("jobs", [])
+                failed_jobs = [j for j in jobs if j.get("conclusion") == "failure"]
+
+                if failed_jobs:
+                    self.console.print()
+                    self.console.print("[bold red]Failed Jobs:[/bold red]")
+                    for job in failed_jobs:
+                        job_name = job.get("name", "Unknown")
+                        job_id = job.get("databaseId", "")
+                        self.console.print(f"  [red]✗[/red] {job_name}")
+
+                        # Show failed steps
+                        steps = job.get("steps", [])
+                        failed_steps = [s for s in steps if s.get("conclusion") == "failure"]
+                        for step in failed_steps:
+                            step_name = step.get("name", "Unknown")
+                            self.console.print(f"      [dim]→ {step_name}[/dim]")
+
+                        # Fetch and show error message from logs
+                        if job_id:
+                            self._show_error_from_logs(repo, str(job_id))
+        except Exception as e:
+            self.console.print(f"[red]Error fetching job details: {e}[/red]")
+
+    def _show_error_from_logs(self, repo: str, job_id: str) -> None:
+        """Extract and show error message from job logs."""
+        cmd = [
+            "gh", "api",
+            f"repos/{repo}/actions/jobs/{job_id}/logs"
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0 and result.stdout:
+                logs = result.stdout
+                error_msg = self._extract_error_message(logs)
+                if error_msg:
+                    self.console.print()
+                    self.console.print("[bold yellow]Error Details:[/bold yellow]")
+                    self.console.print(f"[red]{error_msg}[/red]")
+            elif result.stderr:
+                # Try alternative: gh run view with --log-failed
+                self._show_error_from_run_log(repo, job_id)
+        except Exception:
+            # Try alternative method
+            self._show_error_from_run_log(repo, job_id)
+
+    def _show_error_from_run_log(self, repo: str, job_id: str) -> None:
+        """Alternative method to get error from failed run logs."""
+        cmd = [
+            "gh", "run", "view",
+            "--repo", repo,
+            "--job", job_id,
+            "--log-failed"
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0 and result.stdout:
+                logs = result.stdout
+                error_msg = self._extract_error_message(logs)
+                if error_msg:
+                    self.console.print()
+                    self.console.print("[bold yellow]Error Details:[/bold yellow]")
+                    self.console.print(f"[red]{error_msg}[/red]")
+        except Exception:
+            pass
+
+    def _extract_error_message(self, logs: str) -> str:
+        """Extract meaningful error message from logs."""
+        import re
+
+        lines = logs.split('\n')
+        error_lines = []
+        capture = False
+        capture_count = 0
+        script_error = None
+
+        for line in lines:
+            # Remove job/step prefix from --log-failed format (e.g., "job_name\tSTEP_NAME\t...")
+            clean_line = re.sub(r'^[^\t]+\t[^\t]+\t', '', line)
+            # Remove timestamp prefix
+            clean_line = re.sub(r'^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*', '', clean_line)
+            # Remove ANSI codes
+            clean_line = re.sub(r'\x1b\[[0-9;]*m', '', clean_line)
+            # Remove ##[error] prefix
+            clean_line = re.sub(r'^##\[error\]\s*', '', clean_line)
+
+            # Capture script error messages (e.g., "Script phpstan ... returned with error code 1")
+            if 'returned with error code' in clean_line and not script_error:
+                script_error = clean_line.strip()
+
+            # Look for failure indicators
+            if any(pattern in clean_line for pattern in [
+                'FAILURES!', 'There was 1 failure:', 'There were',
+                'Fail ', 'FAILED', 'Error:', 'Exception:',
+                'PHPStan found', 'error(s)', 'fatal error',
+                '[ERROR]', 'Fatal error', 'Parse error'
+            ]):
+                capture = True
+                capture_count = 0
+
+            if capture:
+                # Skip empty lines at start
+                if not error_lines and not clean_line.strip():
+                    continue
+                error_lines.append(clean_line)
+                capture_count += 1
+                # Capture up to 15 lines of context
+                if capture_count >= 15:
+                    break
+
+        if error_lines:
+            return '\n'.join(error_lines).strip()
+
+        # Fall back to script error if no detailed error found
+        if script_error:
+            return script_error
+
+        return ""
 
     def _show_logs(self, repo: str, run_id: str) -> None:
         """Show workflow logs."""
