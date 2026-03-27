@@ -57,7 +57,7 @@ make workflow-trigger project=test
 make workflow-trigger project=test wait=1
 make workflow-trigger project=test param=limit="PHP8.5/MySQL8.0"
 
-# Workflow status
+# Workflow status (filters by branch in projects.yaml)
 make workflow-status project=test
 
 # Check all projects at once

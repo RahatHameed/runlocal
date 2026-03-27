@@ -60,9 +60,10 @@ class WorkflowStatusScript(BaseScript):
         project_cfg = self.projects_config["projects"][project]
         repo = project_cfg["repo"]
         workflow = workflow_override or project_cfg.get("workflow", "workflow.yaml")
+        branch = project_cfg.get("branch")
 
         # Get last run
-        run_info = self._get_last_run(repo, workflow)
+        run_info = self._get_last_run(repo, workflow, branch)
         if not run_info:
             return ScriptResult(
                 success=False,
@@ -105,7 +106,7 @@ class WorkflowStatusScript(BaseScript):
 
         return False
 
-    def _get_last_run(self, repo: str, workflow: str) -> Optional[Dict[str, Any]]:
+    def _get_last_run(self, repo: str, workflow: str, branch: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Get the last workflow run."""
         cmd = [
             "gh", "run", "list",
@@ -114,6 +115,8 @@ class WorkflowStatusScript(BaseScript):
             "--limit", "1",
             "--json", "databaseId,status,conclusion,createdAt,updatedAt,headBranch,event,name"
         ]
+        if branch:
+            cmd.extend(["--branch", branch])
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
