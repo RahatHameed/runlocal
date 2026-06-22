@@ -2,12 +2,13 @@
 
 # Workflow dispatch settings
 workflow:
-  # Interval in seconds between status checks
-  poll_interval: 30
+  # Refresh interval (seconds) for `gh run watch`, which blocks until the
+  # run completes. Lower values give snappier live progress.
+  poll_interval: 10
 
   # Maximum time to wait for workflow completion (in seconds)
   # Set to 0 for unlimited
   timeout: 3600
 
-  # Show progress spinner while waiting
+  # Stream `gh run watch` live progress to the terminal while waiting
   show_progress: true

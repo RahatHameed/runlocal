@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `workflow-dispatch` now waits for completion via `gh run watch` (a single blocking command with live step-by-step progress) instead of polling `gh run view` on a fixed interval. `poll_interval` now controls the watch refresh interval (`-i`) and defaults to 10s; `timeout` and `show_progress` are still honored.
+
 ## [1.0.0] - 2026-06-22
 
 ### Added

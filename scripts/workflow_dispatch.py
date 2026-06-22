@@ -25,7 +25,7 @@ class WorkflowDispatchScript(BaseScript):
     )
 
     # Default settings (can be overridden by config.yaml)
-    DEFAULT_POLL_INTERVAL = 30
+    DEFAULT_POLL_INTERVAL = 10
     DEFAULT_TIMEOUT = 3600
     DEFAULT_SHOW_PROGRESS = True
 
@@ -356,61 +356,83 @@ class WorkflowDispatchScript(BaseScript):
         return None
 
     def _wait_for_completion(self, repo: str, run_id: str, verbose: bool) -> ScriptResult:
-        """Wait for the workflow to complete silently."""
+        """Block until the workflow completes using `gh run watch`.
+
+        `gh run watch` polls GitHub and blocks until the run finishes, so we let
+        it own the wait loop instead of polling `gh run view` ourselves. The
+        config `poll_interval` maps to its refresh interval (`-i`), `timeout`
+        bounds the subprocess, and `show_progress` decides whether its live
+        progress display streams to the terminal.
+        """
         start_time = time.time()
         poll_interval = self._get_poll_interval()
         timeout = self._get_timeout()
         show_progress = self._get_show_progress()
 
-        # Show minimal progress indicator
+        cmd = [
+            "gh", "run", "watch", run_id,
+            "-R", repo,
+            "--exit-status",
+            "-i", str(max(poll_interval, 1)),
+        ]
+        if not verbose:
+            cmd.append("--compact")
+
         if show_progress:
-            self.console.print(f"[dim]Waiting for workflow {run_id} to complete (polling every {poll_interval}s)...[/dim]")
+            self.console.print(f"[dim]Watching workflow {run_id} until it completes...[/dim]")
 
-        while True:
-            status_info = self._get_run_status(repo, run_id)
-
-            if not status_info:
-                return ScriptResult(
-                    success=False,
-                    message="Failed to get workflow status",
-                    errors=["Could not retrieve run status"]
-                )
-
+        try:
+            # Stream live progress to the terminal when enabled; otherwise
+            # capture (and discard) it to stay quiet.
+            subprocess.run(
+                cmd,
+                capture_output=not show_progress,
+                text=True,
+                timeout=timeout if timeout > 0 else None,
+            )
+        except subprocess.TimeoutExpired:
             elapsed = int(time.time() - start_time)
+            return ScriptResult(
+                success=False,
+                message="Workflow timed out",
+                data={
+                    "run_id": run_id,
+                    "elapsed_seconds": elapsed,
+                    "url": f"https://github.com/{repo}/actions/runs/{run_id}",
+                },
+                errors=[f"Timeout after {elapsed}s"]
+            )
+        except Exception as e:
+            return ScriptResult(
+                success=False,
+                message="Failed to watch workflow",
+                errors=[str(e)]
+            )
 
-            # Check for completion
-            if status_info["status"] == "completed":
-                conclusion = status_info.get("conclusion", "unknown")
-                return ScriptResult(
-                    success=(conclusion == "success"),
-                    message=f"Workflow {conclusion}",
-                    data={
-                        "run_id": run_id,
-                        "conclusion": conclusion,
-                        "elapsed_seconds": elapsed,
-                        "url": status_info.get("url", ""),
-                        "status_info": status_info
-                    }
-                )
+        elapsed = int(time.time() - start_time)
 
-            # Check for timeout
-            if timeout > 0 and elapsed > timeout:
-                return ScriptResult(
-                    success=False,
-                    message="Workflow timed out",
-                    data={
-                        "run_id": run_id,
-                        "elapsed_seconds": elapsed,
-                        "url": status_info.get("url", "")
-                    },
-                    errors=[f"Timeout after {elapsed}s"]
-                )
+        # `gh run watch --exit-status` reflects the conclusion in its return
+        # code, but fetch the run once to populate the full result shape.
+        status_info = self._get_run_status(repo, run_id)
+        if not status_info:
+            return ScriptResult(
+                success=False,
+                message="Failed to get workflow status",
+                errors=["Could not retrieve run status"]
+            )
 
-            # Show progress dot
-            if show_progress:
-                print(".", end="", flush=True)
-
-            time.sleep(poll_interval)
+        conclusion = status_info.get("conclusion", "unknown")
+        return ScriptResult(
+            success=(conclusion == "success"),
+            message=f"Workflow {conclusion}",
+            data={
+                "run_id": run_id,
+                "conclusion": conclusion,
+                "elapsed_seconds": elapsed,
+                "url": status_info.get("url", ""),
+                "status_info": status_info
+            }
+        )
 
     def _get_run_status(self, repo: str, run_id: str) -> Optional[Dict[str, Any]]:
         """Get the current status of a workflow run."""
